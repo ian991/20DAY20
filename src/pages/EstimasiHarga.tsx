@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
+import { Percent, Sparkles, CheckCircle, HelpCircle, Receipt, ArrowRight, MessageSquare, ChevronDown, Award } from 'lucide-react';
 
 interface SubService {
   name: string;
@@ -8,6 +9,44 @@ interface SubService {
   minUnits: number;
   maxUnits: number;
   defaultUnits: number;
+}
+
+interface AnimatedPriceProps {
+  value: number;
+  format?: (num: number) => string;
+}
+
+function AnimatedPrice({ value, format }: AnimatedPriceProps) {
+  const [displayValue, setDisplayValue] = useState(value);
+
+  useEffect(() => {
+    let start = displayValue;
+    const end = value;
+    if (start === end) return;
+
+    const duration = 800; // ms
+    const startTime = performance.now();
+
+    let animationFrameId: number;
+
+    const updateNumber = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      // Easing out quadratic
+      const ease = progress * (2 - progress);
+      const current = Math.round(start + (end - start) * ease);
+      setDisplayValue(current);
+
+      if (progress < 1) {
+        animationFrameId = requestAnimationFrame(updateNumber);
+      }
+    };
+
+    animationFrameId = requestAnimationFrame(updateNumber);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [value]);
+
+  return <span>{format ? format(displayValue) : displayValue}</span>;
 }
 
 const SERVICE_CLASSES: Record<string, SubService[]> = {
@@ -51,6 +90,9 @@ export default function EstimasiHarga() {
   const [units, setUnits] = useState<number>(1);
   const [calcMethod, setCalcMethod] = useState<'otomatis' | 'konsul'>('otomatis');
 
+  const [discountApplied, setDiscountApplied] = useState(false);
+  const [isCalculating, setIsCalculating] = useState(false);
+
   // Sync sub-service and default units when active category changes
   const handleClassChange = (className: string) => {
     setSelectedClass(className);
@@ -68,11 +110,34 @@ export default function EstimasiHarga() {
     }
   };
 
-  const calculateTotal = () => {
+  const getBasePrice = () => {
+    const raw = selectedSubService.basePrice;
+    return discountApplied ? Math.round(raw * 0.5) : raw;
+  };
+
+  const getOriginalBasePrice = () => {
+    return selectedSubService.basePrice;
+  };
+
+  const calculateTotal = (applyDiscount = discountApplied) => {
     const base = selectedSubService.basePrice;
     const levelMult = academicLevel.multiplier;
     const urgencyMult = urgency.multiplier;
-    return Math.round(base * units * levelMult * urgencyMult);
+    const rawTotal = Math.round(base * units * levelMult * urgencyMult);
+    return applyDiscount ? Math.round(rawTotal * 0.5) : rawTotal;
+  };
+
+  const getOriginalTotal = () => {
+    return calculateTotal(false);
+  };
+
+  const handleCalculate = () => {
+    setIsCalculating(true);
+    // Simulate interactive calculating/discount applying feel
+    setTimeout(() => {
+      setIsCalculating(false);
+      setDiscountApplied(true);
+    }, 900);
   };
 
   const formatRupiah = (num: number) => {
@@ -86,6 +151,7 @@ export default function EstimasiHarga() {
 
   const handleWhatsAppOrder = () => {
     const total = calculateTotal();
+    const originalTotal = getOriginalTotal();
     const isJasaSkripsiKonsul = selectedClass === 'Jasa Skripsi' && calcMethod === 'konsul';
 
     const messageText = isJasaSkripsiKonsul 
@@ -108,7 +174,7 @@ Mohon dibantu bimbingan kalkulasi harga terbaik untuk tugas saya. Terima kasih!`
 • Jenjang: ${academicLevel.name}
 • Batas Waktu: ${urgency.name}
 • Kuantitas: ${units} ${selectedSubService.unitLabel}
-• Estimasi Harga: *${formatRupiah(total)}*
+• Estimasi Harga: *${formatRupiah(total)}* ${discountApplied ? `(Diskon Promo 50% Aktif! Harga Normal: ${formatRupiah(originalTotal)})` : ''}
 
 Mohon panduan untuk langkah berikutnya. Terima kasih!`;
 
@@ -224,7 +290,7 @@ Mohon panduan untuk langkah berikutnya. Terima kasih!`;
                 >
                   {SERVICE_CLASSES[selectedClass].map((sub) => (
                     <option key={sub.name} value={sub.name} className="py-2 text-black">
-                      {sub.name} (Mulai {formatRupiah(sub.basePrice)}/{sub.unitLabel})
+                      {sub.name} (Mulai {formatRupiah(discountApplied ? Math.round(sub.basePrice * 0.5) : sub.basePrice)}/{sub.unitLabel})
                     </option>
                   ))}
                 </select>
@@ -403,6 +469,14 @@ Mohon panduan untuk langkah berikutnya. Terima kasih!`;
               </div>
             </div>
 
+            {/* Action info banner directly guiding users */}
+            <div className="mt-8 pt-6 border-t-2 border-dashed border-black text-center">
+              <p className="text-xs font-bold text-slate-600">
+                👉 Klik tombol <strong className="text-black uppercase">Hitung Estimasi</strong> di panel rincian sebelah kanan untuk mendapatkan harga final & diskon 
+                <span className="px-1.5 py-0.5 ml-1 bg-red-100 border border-red-400 text-red-700 rounded font-black">50% OFF</span>!
+              </p>
+            </div>
+
           </motion.div>
 
           {/* Pricing Receipt Side */}
@@ -435,10 +509,22 @@ Mohon panduan untuk langkah berikutnya. Terima kasih!`;
                   </div>
                   <div className="flex justify-between border-b border-black/10 pb-2">
                     <span className="text-slate-600 uppercase tracking-wider text-[10px]">Harga Dasar:</span>
-                    <span className="font-extrabold text-black">
-                      {selectedClass === 'Jasa Skripsi' && calcMethod === 'konsul' ? 'Mulai dari ' : ''}
-                      {formatRupiah(selectedSubService.basePrice)}
-                      <span className="text-[10px] text-slate-500 font-bold lowercase"> / {selectedSubService.unitLabel.toLowerCase()}</span>
+                    <span className="font-extrabold text-black flex items-center justify-end gap-1.5 min-w-0">
+                      {selectedClass === 'Jasa Skripsi' && calcMethod === 'konsul' ? (
+                        <span>Mulai dari {formatRupiah(selectedSubService.basePrice)}</span>
+                      ) : (
+                        <>
+                          {discountApplied && (
+                            <span className="text-slate-400 line-through text-[11px] font-bold decoration-red-500 decoration-1">
+                              {formatRupiah(getOriginalBasePrice())}
+                            </span>
+                          )}
+                          <span className={discountApplied ? 'text-teal-600 font-extrabold' : 'text-black font-extrabold'}>
+                            <AnimatedPrice value={getBasePrice()} format={formatRupiah} />
+                          </span>
+                        </>
+                      )}
+                      <span className="text-[10px] text-slate-500 font-bold lowercase shrink-0"> / {selectedSubService.unitLabel.toLowerCase()}</span>
                     </span>
                   </div>
                   
@@ -465,9 +551,70 @@ Mohon panduan untuk langkah berikutnya. Terima kasih!`;
                   </div>
                 </div>
 
+                {/* Interactive Instant Calculation Trigger & Discount Applier */}
+                <div className="mb-6 bg-amber-50 p-4 rounded-xl border-2 border-black shadow-[3px_3px_0px_#000] text-center">
+                  <div className="flex items-center justify-center gap-1.5 mb-2.5">
+                    <Sparkles className="w-4 h-4 text-amber-500 animate-spin" />
+                    <span className="text-[10px] font-black uppercase text-slate-700 tracking-wider">
+                      {discountApplied ? '🎉 KODE PROMO AKTIF!' : '🔥 PROMO KHUSUS HARI INI'}
+                    </span>
+                  </div>
+
+                  <motion.button
+                    type="button"
+                    onClick={handleCalculate}
+                    disabled={isCalculating}
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    className={`w-full relative py-3.5 px-4 rounded-xl border-2 border-black font-black uppercase tracking-wider text-xs flex items-center justify-center gap-2.5 transition-all shadow-[3px_3px_0px_#000] cursor-pointer ${
+                      discountApplied
+                        ? 'bg-[#10B981] hover:bg-[#059669] text-white active:bg-[#047857]'
+                        : 'bg-[#FBBF24] hover:bg-[#F59E0B] text-black animate-pulse'
+                    }`}
+                  >
+                    {isCalculating ? (
+                      <>
+                        <span className="animate-spin inline-block w-4 h-4 border-2 border-current border-t-transparent rounded-full" />
+                        <span>Menerapkan Diskon 50%...</span>
+                      </>
+                    ) : discountApplied ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 animate-bounce" />
+                        <span>Diskon 50% Aktif (Hitung Ulang)</span>
+                      </>
+                    ) : (
+                      <>
+                        <Percent className="w-4 h-4 animate-bounce" />
+                        <span>Hitung Estimasi & Diskon 50%</span>
+                      </>
+                    )}
+                  </motion.button>
+
+                  <p className="text-[9px] font-black uppercase text-slate-500 mt-2 leading-tight">
+                    {discountApplied 
+                      ? 'Selamat! Tarif pengerjaan Anda otomatis dipangkas setengah harga.' 
+                      : '*Cukup klik untuk otomatis memotong seluruh list harga di atas sebesar 50%!'}
+                  </p>
+                </div>
+
+                {/* Special pulsing discount banner */}
+                {discountApplied && (
+                  <motion.div
+                    initial={{ scale: 0.95 }}
+                    animate={{ scale: [0.95, 1, 0.95] }}
+                    transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
+                    className="mb-4 bg-red-500 text-white border-2 border-black p-2.5 rounded-lg font-black text-xs uppercase tracking-widest text-center shadow-[2px_2px_0px_#000] flex items-center justify-center gap-1.5"
+                  >
+                    <Sparkles className="w-4 h-4 font-black text-amber-300" />
+                    <span>SPESIAL DISKON 50% AKTIF!</span>
+                  </motion.div>
+                )}
+
                 {/* Sub Total Show */}
-                <div className="bg-primary p-5 rounded-lg border-2 border-black shadow-[3px_3px_0px_#000] mb-8 text-center text-white">
-                  <p className="text-xs font-black uppercase tracking-widest mb-1 text-slate-300">Total Perkiraan Biaya</p>
+                <div className={`${discountApplied ? 'bg-amber-400 border-amber-500 text-black' : 'bg-primary text-white'} p-5 rounded-lg border-2 border-black shadow-[3px_3px_0px_#000] mb-8 text-center transition-all duration-300`}>
+                  <p className={`text-xs font-black uppercase tracking-widest mb-1 ${discountApplied ? 'text-black/80' : 'text-slate-300'}`}>
+                    {discountApplied ? '💸 Total Tarif (Diskon 50%!)' : 'Total Perkiraan Biaya'}
+                  </p>
                   {selectedClass === 'Jasa Skripsi' && calcMethod === 'konsul' ? (
                     <div className="py-2">
                       <p className="text-2xl font-black uppercase tracking-tight text-white">Hubungi Admin</p>
@@ -477,11 +624,20 @@ Mohon panduan untuk langkah berikutnya. Terima kasih!`;
                     </div>
                   ) : (
                     <>
-                      <p className="text-3xl font-black text-secondary tracking-tight leading-none">
-                        {formatRupiah(calculateTotal())}
-                      </p>
-                      <p className="text-[10px] font-bold text-slate-300 mt-2 leading-relaxed leading-tight">
-                        *Telah disesuaikan dengan jenjang akademik dan tenggat waktu.
+                      <div className="flex flex-col items-center justify-center py-1">
+                        {discountApplied && (
+                          <span className="text-slate-800 line-through text-xs font-black opacity-70 mb-1 decoration-2 decoration-red-600">
+                            {formatRupiah(getOriginalTotal())}
+                          </span>
+                        )}
+                        <p className={`text-3xl font-black tracking-tight leading-none ${discountApplied ? 'text-black font-black' : 'text-secondary'}`}>
+                          <AnimatedPrice value={calculateTotal()} format={formatRupiah} />
+                        </p>
+                      </div>
+                      <p className={`text-[10px] font-bold ${discountApplied ? 'text-slate-900 border-t border-black/10 mt-2 pt-2' : 'text-slate-300 mt-2'} leading-relaxed`}>
+                        {discountApplied 
+                          ? '*Potongan 50% telah diaplikasikan sukses lewat hitung instan!' 
+                          : '*Telah disesuaikan dengan jenjang akademik dan tenggat waktu.'}
                       </p>
                     </>
                   )}
